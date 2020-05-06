@@ -1,8 +1,10 @@
 import random
 import time
+import copy
 
 import torch
 from torch import nn
+from torch import optim
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -44,6 +46,12 @@ class SynthBase(nn.Module):
         self.n_copies = n_copies
         self.was_looser = torch.zeros(n_copies, device=DEVICE)
 
+    def use_best(self, loss):
+        argmin = loss.argmin()
+        for param in self.named_parameters():
+            param_values = getattr(self, param[0])[argmin].view(-1, 1)
+            setattr(self, param[0], torch.nn.Parameter(param_values, requires_grad=False))
+
     def best(self, loss):
         argmin = loss.argmin()
         best_params = dict()
@@ -61,6 +69,19 @@ class SynthBase(nn.Module):
         current_param[keep_unchanged] = old_values[keep_unchanged]
 
         setattr(self, name, current_param)
+
+    def restart(self):
+        for param in self.named_parameters():
+            name = param[0]
+            self.randomize_param(name)
+        self.was_looser = torch.zeros(self.n_copies, device=DEVICE)
+
+    def enable_gradient(self):
+        for param in self.named_parameters():
+            name = param[0]
+            parameter = getattr(self, name)
+            parameter.requires_grad = True
+            # parameter.register_hook(limit_grad)
 
     def respawn_loosers(self, loss):
         loosing_threshold = loss.topk(int(self.n_copies * self.worst_fraction))[0].min()
@@ -155,26 +176,31 @@ class HarmonicTones(SynthBase):
         return result
 
 
-def setup_harmonic_tones():
+def setup_harmonic_tones(waveshape, parameters=None):
     print('Harmonic tones')
-    parameters = {
-        'frequency0': 20., 'amplitude0': 0.3
-        # 'frequency1': 330., 'amplitude1': 0.2
-    }
+    if parameters is None:
+        parameters = {
+            'frequency0': 20., 'amplitude0': 0.3
+            # 'frequency1': 330., 'amplitude1': 0.2
+        }
     print('Actual parameters', parameters)
     n_sines = len(parameters) // 2
     highest_harmonic = 9
-    kth_harmonic = [1/k if k % 2 == 1 else 0. for k in range(1, highest_harmonic)]  # square
-    # kth_harmonic = [1/k for k in range(1, highest_harmonic)]  # sawtooth
-    # kth_harmonic = [(-1)**(k//2)/(k * k) for k in range(1, highest_harmonic)]  # triangle
+    if waveshape == 'square':
+        kth_harmonic = [1 / k if k % 2 == 1 else 0. for k in range(1, highest_harmonic)]  # square
+    elif waveshape == 'sawtooth':
+        kth_harmonic = [1 / k for k in range(1, highest_harmonic)]  # sawtooth
+    elif waveshape == 'triangle':
+        kth_harmonic = [(-1) ** (k // 2) / (k * k) for k in range(1, highest_harmonic)]  # triangle
+    else:
+        raise ValueError('No known waveshape type')
 
     print('k-th harmonic:', kth_harmonic)
     patch_y = synthesize(HarmonicTones(1, n_sines, kth_harmonic), parameters)
 
-    plt.plot(patch_y[0].cpu().numpy(), label='target')
-    plt.legend()
-    plt.show()
-
+    # plt.plot(patch_y[0].cpu().numpy(), label='target')
+    # plt.legend()
+    # plt.show()
 
     model = HarmonicTones(N_PARALLEL, n_sines, kth_harmonic)
     return model, patch_y
@@ -203,13 +229,14 @@ class SinusTonGemisch(SynthBase):
         return result
 
 
-def setup_sinustongemisch():
+def setup_sinustongemisch(parameters=None):
     print('Sinustongemisch')
-    parameters = {
-        'frequency0': 440., 'amplitude0': 0.3,
-        'frequency1': 330., 'amplitude1': 0.2,
-        'frequency2': 500., 'amplitude2': 0.2
-    }
+    if parameters is None:
+        parameters = {
+            'frequency0': 440., 'amplitude0': 0.3,
+            'frequency1': 330., 'amplitude1': 0.2,
+            'frequency2': 500., 'amplitude2': 0.2
+        }
     print('actual parameters', parameters)
     n_sines = len(parameters) // 2
     patch_y = synthesize(SinusTonGemisch(1, n_sines), parameters)
@@ -236,12 +263,13 @@ class RingModulation(SynthBase):
         return result
 
 
-def setup_ring_modulation():
+def setup_ring_modulation(parameters=None):
     print('Ring Modulation')
-    parameters = {
-        'frequency0': 440.,
-        'frequency1': 100.,
-    }
+    if parameters is None:
+        parameters = {
+            'frequency0': 440.,
+            'frequency1': 100.,
+        }
     print('actual parameters', parameters)
     patch_y = synthesize(RingModulation(1), parameters)
     model = RingModulation(N_PARALLEL)
@@ -275,14 +303,15 @@ class AmplitudeModulation(SynthBase):
         return amplitude * carrier
 
 
-def setup_amplitude_modulation():
+def setup_amplitude_modulation(parameters=None):
     print('Amplitude Modulation')
-    parameters = {
-        'frequency_carrier': 440.,
-        'amplitude_carrier': 0.5,
-        'frequency_modulator': 100.,
-        'amplitude_modulator': 0.3
-    }
+    if parameters is None:
+        parameters = {
+            'frequency_carrier': 440.,
+            'amplitude_carrier': 0.5,
+            'frequency_modulator': 100.,
+            'amplitude_modulator': 0.3
+        }
     print('Actual:', parameters)
     patch_y = synthesize(AmplitudeModulation(1), parameters)
 
@@ -311,14 +340,15 @@ class FrequencyModulation(SynthBase):
         return self.amplitude_carrier.view(-1, 1) * torch.sin(phase)
 
 
-def setup_frequency_modulation():
+def setup_frequency_modulation(parameters=None):
     print('Frequency Modulation')
-    parameters = {
-        'frequency_carrier': 440.,
-        'amplitude_carrier': 0.6,
-        'frequency_modulator': 100.,
-        'modulation_depth': 200.
-    }
+    if parameters is None:
+        parameters = {
+            'frequency_carrier': 440.,
+            'amplitude_carrier': 0.6,
+            'frequency_modulator': 100.,
+            'modulation_depth': 200.
+        }
     print(parameters)
     patch_y = synthesize(FrequencyModulation(1), parameters)
     model = FrequencyModulation(N_PARALLEL)
@@ -346,10 +376,10 @@ def make_spectrogram(audio):
 def compute_loss(output, patch_spectrogram):
     output_spectrogram = make_spectrogram(output)
 
-    # diff = output_spectrogram - patch_spectrogram
-    # loss = torch.sum(diff * diff, dim=1)
+    diff = output_spectrogram - patch_spectrogram
+    loss = torch.sum(diff * diff, dim=1)
 
-    loss = torch.abs(output_spectrogram - patch_spectrogram).sum(dim=1)
+    # loss = torch.abs(output_spectrogram - patch_spectrogram).sum(dim=1)
     return loss
 
 
@@ -364,8 +394,8 @@ def main():
     # model, patch_y = setup_sinustongemisch()
     # model, patch_y, maxmsp = setup_ring_modulation()
     # model, patch_y = setup_amplitude_modulation()
-    # model, patch_y = setup_frequency_modulation()
-    model, patch_y = setup_harmonic_tones()
+    model, patch_y = setup_frequency_modulation()
+    # model, patch_y = setup_harmonic_tones('square')
     # model.print_statistics()
 
     ANALYZE_MAX = False
@@ -375,13 +405,79 @@ def main():
     else:
         print('Synthesized in python')
 
-    patch_spectrogram = make_spectrogram(patch_y)
+    best = find_parameters(model, patch_y, iterations=500, restart=3)
+    print(f'FINAL RESULT (loss = {best[0]:.1f})')
+    print(best[1])
+
+
+def improve(model, patch_spectrogram):
+    print('Improving with gradient')
+    model.enable_gradient()
+
     n_samples = int(SIGNAL_RATE * SECONDS)
     t = torch.linspace(0, SECONDS, n_samples, device=DEVICE)
-    start_time = time.time()
-    param_names = [param[0] for param in model.named_parameters()]
+    optimizer = optim.Adam(model.parameters(), lr=1e-3)
 
-    for idx in range(1, 100000):  # 100000
+    output = model(t)
+    best_loss = compute_loss(output, patch_spectrogram)
+    best_model = copy.deepcopy(model)
+    improvement = False
+    for idx in range(1, 100000):
+        optimizer.zero_grad()
+        output = model(t)
+        loss = compute_loss(output, patch_spectrogram)
+        # print(idx, min(loss).item())
+        # loss.backward(torch.full((N_PARALLEL,), 1, dtype=float).to(DEVICE))
+        loss.backward()
+        optimizer.step()
+
+        if loss < best_loss - 1.:
+            improvement = True
+            best_loss = loss
+            best_model = copy.deepcopy(model)
+
+        if idx % 100 == 0:
+            if not improvement:
+                print(f'No more improvement @{idx}')
+                break
+            else:
+                improvement = False
+    return best_model, best_loss
+
+
+def find_parameters(model, patch_y, iterations, restart):
+    patch_spectrogram = make_spectrogram(patch_y)
+    best = None
+    best_model = None
+    for round_idx in range(restart):
+        print(f'/// Round {round_idx} \\\\\\')
+        model.restart()
+        model, loss = run_round(model, patch_spectrogram, iterations)
+        if best is None:
+            best = model.best(loss)
+            best_model = copy.deepcopy(model)
+        if model.best(loss)[1] < best[1]:
+            best = model.best(loss)
+            best_model = copy.deepcopy(model)
+
+    model = copy.deepcopy(best_model)
+    n_samples = int(SIGNAL_RATE * SECONDS)
+    t = torch.linspace(0, SECONDS, n_samples, device=DEVICE)
+    output = model(t)
+    loss = compute_loss(output, patch_spectrogram)
+    model.use_best(loss)
+    model, loss = improve(model, patch_spectrogram)
+    if model.best(loss)[1] < best[1]:
+        best = model.best(loss)
+
+    return best[1], best[2]
+
+
+def run_round(model, patch_spectrogram, iterations, verbose=False):
+    n_samples = int(SIGNAL_RATE * SECONDS)
+    t = torch.linspace(0, SECONDS, n_samples, device=DEVICE)
+    param_names = [param[0] for param in model.named_parameters()]
+    for idx in range(1, iterations + 1):
         param_name = random.choice(param_names)
         old_param = getattr(model, param_name)
 
@@ -403,23 +499,22 @@ def main():
         model.respawn_loosers(loss)
         model.to(DEVICE)
 
-        if idx % 1000 == 0:
+        if idx % (iterations // 3) == 0:
             output = model(t)
             loss = compute_loss(output, patch_spectrogram)
             argmin, best_loss, best_params = model.best(loss)
             print(f'{best_loss:5.1f} || ', end='')
             print_params(best_params)
-            time_elapsed = time.time() - start_time
-            # print('time elapsed:', time_elapsed, 'seconds, iteration:', idx)
-            start_time = time.time()
-            # model.print_statistics()
-            model.print_top_k(loss, 5)
+            if verbose:
+                model.print_top_k(loss, 5)
 
-            if idx % 5000 == 0:
-                plt.plot(output[argmin].detach().cpu().numpy(), label='output')
-                plt.plot(patch_y[0].cpu().numpy(), label='target')
-                plt.legend()
-                plt.show()
+            # if idx % 5000 == 0:
+            #     plt.plot(output[argmin].detach().cpu().numpy(), label='output')
+            #     plt.plot(patch_y[0].cpu().numpy(), label='target')
+            #     plt.legend()
+            #     plt.show()
+
+    return model, loss
 
 
 if __name__ == '__main__':

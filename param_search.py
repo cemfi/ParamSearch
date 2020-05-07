@@ -187,11 +187,13 @@ def setup_harmonic_tones(waveshape, parameters=None):
     n_sines = len(parameters) // 2
     highest_harmonic = 9
     if waveshape == 'square':
-        kth_harmonic = [1 / k if k % 2 == 1 else 0. for k in range(1, highest_harmonic)]  # square
+        kth_harmonic = [1 / k if k % 2 == 1 else 0. for k in range(1, highest_harmonic)]
     elif waveshape == 'sawtooth':
-        kth_harmonic = [1 / k for k in range(1, highest_harmonic)]  # sawtooth
+        kth_harmonic = [1 / k for k in range(1, highest_harmonic)]
     elif waveshape == 'triangle':
-        kth_harmonic = [(-1) ** (k // 2) / (k * k) for k in range(1, highest_harmonic)]  # triangle
+        kth_harmonic = [(-1) ** (k // 2) / (k * k) for k in range(1, highest_harmonic)]
+    elif waveshape == 'sine':
+        kth_harmonic = [1.]
     else:
         raise ValueError('No known waveshape type')
 
@@ -405,7 +407,7 @@ def main():
     else:
         print('Synthesized in python')
 
-    best = find_parameters(model, patch_y, iterations=500, restart=3)
+    best = find_parameters(model, patch_y, iterations=500, rounds=3)
     print(f'FINAL RESULT (loss = {best[0]:.1f})')
     print(best[1])
 
@@ -445,11 +447,11 @@ def improve(model, patch_spectrogram):
     return best_model, best_loss
 
 
-def find_parameters(model, patch_y, iterations, restart):
+def find_parameters(model, patch_y, iterations=500, rounds=3):
     patch_spectrogram = make_spectrogram(patch_y)
     best = None
     best_model = None
-    for round_idx in range(restart):
+    for round_idx in range(rounds):
         print(f'/// Round {round_idx} \\\\\\')
         model.restart()
         model, loss = run_round(model, patch_spectrogram, iterations)
